@@ -9,7 +9,7 @@
 
 dshot::dShotData dshot::controllers[DSHOT_CONTROLLER_COUNT];
 
-void dshot::sendController(const dShotData data) {
+__attribute__((noinline)) void dshot::sendController(const dShotData &data) {
 	uint8_t pinPort = data.pinPort;
 	if (pinPort == 0) {
 		return; //dont process uninitialized
@@ -19,19 +19,26 @@ void dshot::sendController(const dShotData data) {
 	bool *bits = data.bits;
 
 	cli(); // dont need other timer interrupts or so messing with my output
-	for (int i = 0; i < 16; ++i) {
-		*((volatile uint8_t*) pinPort) |= pinMaskOn;
+
+	//i painstakingly counted the cycles from the disassembly of this
+	//an assembly block would indeed be better suited for this
+	//but assembly is very hard to understand (and write interop with c++)
+	for (uint8_t i = 0; i < 16; ++i) { //ldi	r31, 0x00	; 0
+		//we have to switch on in both cases, so might aswell do it here
+		*((volatile uint8_t*) pinPort) |= pinMaskOn; // 2(ld) + 1(or) + 2(st) = 5 cycles
 		//TODO: adjust nop counts depending on how many cycles instructions and loop take
-		if (bits[i]) {
+		if (bits[i]) { // ld, and, brne, rjmp. 2+1+1+2 if low bit, 2+1+2 if high bit
 			//high bit
-			nop<T1H>();
-			*((volatile uint8_t*) pinPort) &= pinMaskOff;
-			nop<T1L>();
+			nop<T1H - 5 - 5>();	//subtract the following cycles till pin is switched off and the comparison+jmp
+			*((volatile uint8_t*) pinPort) &= pinMaskOff; // 2(ld) + 1(and) + 2(st) = 5 cycles
+			nop<T1L - 5 - 6>(); //subtract the following cycles till switch on is finished again
+			//ldi, cpi, cpc, breq, rjmp- 1+1+1+1+2=6 if not end of loop, 1+1+1+2=5 if end of loop
 		} else {
 			//low bit
-			nop<T0H>();
-			*((volatile uint8_t*) pinPort) &= pinMaskOff;
-			nop<T0L>();
+			nop<T0H - 5 - 6>(); //subtract the following cycles till pin is switched off and the comparison+jmp
+			*((volatile uint8_t*) pinPort) &= pinMaskOff; // 2(ld) + 1(and) + 2(st) = 5 cycles
+			nop<T0L - 5 - 6 - 2>(); //subtract the following cycles till switch on is finished again
+			//rjmp. 2 right into the nops at the end of high bit part
 		}
 	}
 	sei();

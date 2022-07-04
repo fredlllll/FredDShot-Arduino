@@ -97,7 +97,7 @@ constexpr uint8_t constDigitalPinToIndex(const uint8_t pin) {
 			(pin >= A0 && pin <= A5) ? pin - A0 : 0;
 }
 
-void sendController(const dShotData data);
+void sendController(const dShotData& data);
 void sendData();
 
 const uint8_t calcCrc(const uint16_t value);
